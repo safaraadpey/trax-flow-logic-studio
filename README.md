@@ -48,7 +48,19 @@ Provider architecture:
 - `src/ai/providers/` — Mock, OpenAI, Claude, and Gemini adapters.
 - `src/store/aiSettingsStore.ts` — persisted active-provider selection.
 
-Mock is ready by default. Gemini can be enabled locally with `GEMINI_API_KEY` and `VITE_GEMINI_ENABLED=true`; Vite proxies requests through `/api/gemini` so the editor still talks only to `AIService`. OpenAI and Claude remain registered placeholders.
+Mock is ready by default. Gemini can be enabled with `GEMINI_API_KEY` and `VITE_GEMINI_ENABLED=true`. Local development proxies `/api/gemini` through Vite, while Vercel serves the same route from `api/gemini.ts`. The API key remains server-side. OpenAI and Claude remain registered placeholders.
+
+### Vercel Gemini configuration
+
+Add these project environment variables for Production and Preview, then redeploy:
+
+```text
+GEMINI_API_KEY=your_gemini_api_key
+VITE_GEMINI_ENABLED=true
+VITE_GEMINI_MODEL=gemini-3.5-flash
+```
+
+The browser sends AI requests to `/api/gemini`; the Vercel Function forwards them to the official Gemini API.
 
 ## Semantic data model
 
