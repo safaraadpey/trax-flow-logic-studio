@@ -2,6 +2,9 @@ node_modules/
 dist/
 .npm-cache/
 .docx-preview/
+.env
+.env.*
+!.env.example
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

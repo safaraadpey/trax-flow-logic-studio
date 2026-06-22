@@ -1,4 +1,4 @@
-# Flow Logic Studio v0.1
+# Flow Logic Studio v0.2
 
 A visual semantic flow editor for designing developer-friendly automation logic. The canvas is only a view: the source of truth is a typed `FlowGraph` JSON model that can be validated and exported.
 
@@ -25,6 +25,30 @@ npm run preview
 - `src/App.tsx` — desktop studio layout, palette, canvas, inspector, toolbar, previews, and validation panel.
 
 The Zustand store persists the current graph in `localStorage` under `flow-logic-studio-v01`.
+
+## AI Flow Copilot
+
+The collapsible AI Copilot uses a deterministic local generator, so no API key is required.
+
+- Natural-language prompts produce editable semantic `FlowGraph` JSON.
+- Scheduler, room, random, waiting, player, or bingo prompts produce the Bingo Scheduler flow.
+- Other prompts produce a simple Start → Condition → Action → End workflow.
+- Generated flows are previewed and validated before they can be applied.
+- The current flow can be improved, explained, or converted to Mermaid.
+
+The editor never calls vendor implementations directly. Requests follow:
+
+`AI Copilot → AIService → active AIProvider`
+
+Provider architecture:
+
+- `src/ai/AIProvider.ts` — shared asynchronous provider contract.
+- `src/ai/providerRegistry.ts` — extensible provider registration.
+- `src/ai/aiService.ts` — the only request gateway used by the editor.
+- `src/ai/providers/` — Mock, OpenAI, Claude, and Gemini adapters.
+- `src/store/aiSettingsStore.ts` — persisted active-provider selection.
+
+Mock is ready by default. Gemini can be enabled locally with `GEMINI_API_KEY` and `VITE_GEMINI_ENABLED=true`; Vite proxies requests through `/api/gemini` so the editor still talks only to `AIService`. OpenAI and Claude remain registered placeholders.
 
 ## Semantic data model
 

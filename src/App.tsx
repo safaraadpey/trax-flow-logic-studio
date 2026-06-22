@@ -6,7 +6,7 @@ import {
 import {
   AlignHorizontalSpaceAround, Box, Braces, CheckCircle2, ChevronDown, Clock3,
   Database, Dice5, Download, FileJson, Flag, FolderOpen, GitBranch,
-  Grid3X3, PanelBottom, Play, Plus, Save, ScrollText, Trash2, Upload, XCircle,
+  Grid3X3, PanelBottom, Play, Plus, Save, ScrollText, Settings2, Trash2, Upload, XCircle,
 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { nodeLabels, nodeTypes as supportedNodeTypes, type FlowNodeType, type FlowPort } from './types/flow'
@@ -16,9 +16,13 @@ import { exportMermaid } from './lib/exportMermaid'
 import { exportTypescript } from './lib/exportTypescript'
 import { validateFlow } from './lib/validateFlow'
 import { importMermaid } from './lib/importMermaid'
+import { AICopilotPanel } from './components/ai/AICopilotPanel'
+import { AISettingsDialog } from './components/ai/AISettingsDialog'
+import { useAISettingsStore } from './store/aiSettingsStore'
+import { aiService } from './ai/aiService'
 
 const semanticNodeTypes: NodeTypes = { semantic: SemanticNode }
-type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation'
+type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation' | 'ai-explanation'
 
 const paletteMeta: Record<FlowNodeType, { icon: typeof Flag; color: string; description: string }> = {
   StartNode: { icon: Flag, color: '#34d399', description: 'Trigger the flow' },
@@ -77,14 +81,14 @@ function download(name: string, content: string, type = 'text/plain') {
   URL.revokeObjectURL(url)
 }
 
-function Toolbar({ onImport }: { onImport: () => void }) {
+function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISettings: () => void }) {
   const { graph, newFlow, loadDemo, save, autoLayout, savedAt } = useFlowStore()
   const mermaidText = useMemo(() => exportMermaid(graph), [graph])
   return (
     <header className="toolbar">
       <div className="brand">
         <div className="brand-mark"><GitBranch size={18} /></div>
-        <div><strong>Flow Logic</strong><span>STUDIO · v0.1</span></div>
+        <div><strong>Flow Logic</strong><span>STUDIO · v0.2</span></div>
       </div>
       <div className="toolbar-actions">
         <button onClick={newFlow}><Plus size={15} />New Flow</button>
@@ -95,6 +99,7 @@ function Toolbar({ onImport }: { onImport: () => void }) {
         <button onClick={onImport}><Upload size={15} />Import Mermaid</button>
         <button onClick={() => download(`${graph.name}.json`, JSON.stringify(graph, null, 2), 'application/json')}><FileJson size={15} />JSON</button>
         <button onClick={() => download(`${graph.name}.mmd`, mermaidText)}><Download size={15} />Mermaid</button>
+        <button onClick={onAISettings}><Settings2 size={15} />AI Settings</button>
       </div>
       <div className="save-state"><span className="status-dot" />{savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Locally persisted'}</div>
     </header>
@@ -216,20 +221,35 @@ function MermaidPreview({ source }: { source: string }) {
 
 function BottomPanel() {
   const graph = useFlowStore((state) => state.graph)
+  const activeProviderId = useAISettingsStore((state) => state.activeProviderId)
   const [tab, setTab] = useState<BottomTab>('validation')
   const [expanded, setExpanded] = useState(true)
+  const [aiExplanation, setAIExplanation] = useState('Open this tab to generate an explanation through the active AI provider.')
+  const [explanationLoading, setExplanationLoading] = useState(false)
+  const [explanationError, setExplanationError] = useState('')
   const mermaidText = useMemo(() => exportMermaid(graph), [graph])
   const typescriptText = useMemo(() => exportTypescript(graph), [graph])
   const issues = useMemo(() => validateFlow(graph), [graph])
   const content = tab === 'json' ? JSON.stringify(graph, null, 2) : tab === 'mermaid' ? mermaidText : typescriptText
+  useEffect(() => {
+    if (tab !== 'ai-explanation') return
+    let active = true
+    setExplanationLoading(true)
+    setExplanationError('')
+    aiService.explainFlow(graph, { providerId: activeProviderId })
+      .then((explanation) => { if (active) setAIExplanation(explanation) })
+      .catch((reason) => { if (active) setExplanationError(reason instanceof Error ? reason.message : String(reason)) })
+      .finally(() => { if (active) setExplanationLoading(false) })
+    return () => { active = false }
+  }, [tab, graph, activeProviderId])
   return (
     <section className={`bottom-panel ${expanded ? '' : 'collapsed'}`}>
       <div className="bottom-tabs">
         <button className="collapse-button" onClick={() => setExpanded(!expanded)}><PanelBottom size={14} /></button>
-        {(['json', 'mermaid', 'typescript', 'validation'] as BottomTab[]).map((name) => (
+        {(['json', 'mermaid', 'typescript', 'validation', 'ai-explanation'] as BottomTab[]).map((name) => (
           <button className={tab === name ? 'active' : ''} onClick={() => { setTab(name); setExpanded(true) }} key={name}>
             {name === 'validation' && <span className={`issue-count ${issues.some((i) => i.level === 'error') ? 'has-error' : ''}`}>{issues.length}</span>}
-            {name === 'typescript' ? 'TypeScript' : name[0].toUpperCase() + name.slice(1)}
+            {name === 'typescript' ? 'TypeScript' : name === 'ai-explanation' ? 'AI Explanation' : name[0].toUpperCase() + name.slice(1)}
           </button>
         ))}
       </div>
@@ -246,6 +266,11 @@ function BottomPanel() {
             </div>
           ) : tab === 'mermaid' ? (
             <div className="split-preview"><pre>{content}</pre><MermaidPreview source={mermaidText} /></div>
+          ) : tab === 'ai-explanation' ? (
+            <div className="ai-explanation">
+              <div className="ai-explanation-icon"><Braces size={18} /></div>
+              <pre>{explanationLoading ? 'Generating explanation…' : explanationError || aiExplanation}</pre>
+            </div>
           ) : <pre>{content}</pre>}
         </div>
       )}
@@ -322,6 +347,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
 
 function AppShell() {
   const [importOpen, setImportOpen] = useState(false)
+  const [aiSettingsOpen, setAISettingsOpen] = useState(false)
   const removeSelected = useFlowStore((state) => state.removeSelected)
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -332,10 +358,11 @@ function AppShell() {
   }, [removeSelected])
   return (
     <div className="app-shell">
-      <Toolbar onImport={() => setImportOpen(true)} />
-      <div className="workspace"><Palette /><Canvas /><Inspector /></div>
+      <Toolbar onImport={() => setImportOpen(true)} onAISettings={() => setAISettingsOpen(true)} />
+      <div className="workspace"><Palette /><Canvas /><AICopilotPanel /><Inspector /></div>
       <BottomPanel />
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
+      {aiSettingsOpen && <AISettingsDialog onClose={() => setAISettingsOpen(false)} />}
     </div>
   )
 }
