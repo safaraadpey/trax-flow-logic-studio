@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { addEdge, applyEdgeChanges, applyNodeChanges, type Connection, type EdgeChange, type NodeChange } from '@xyflow/react'
-import type { FlowEdge, FlowGraph, FlowNode, FlowNodeData, FlowNodeType } from '../types/flow'
+import type { FlowEdge, FlowGraph, FlowNode, FlowNodeData, FlowNodeType, FlowVariable } from '../types/flow'
 import { createFlowNode } from '../types/flow'
-import { createDemoFlow } from '../lib/demoFlow'
+import { createCardNumberDemo, createDemoFlow } from '../lib/demoFlow'
 import { id } from '../lib/id'
+import { createFlowVariable, normalizeFlowGraph } from '../lib/flowVariables'
 
 type Selection = { kind: 'node' | 'edge'; id: string } | null
 
@@ -15,6 +16,10 @@ interface FlowState {
   setGraph: (graph: FlowGraph) => void
   newFlow: () => void
   loadDemo: () => void
+  loadCardDemo: () => void
+  addVariable: (patch?: Partial<FlowVariable>) => FlowVariable
+  updateVariable: (variableId: string, patch: Partial<FlowVariable>) => void
+  removeVariable: (variableId: string) => void
   addNode: (type: FlowNodeType, position: { x: number; y: number }) => void
   onNodesChange: (changes: NodeChange<FlowNode>[]) => void
   onEdgesChange: (changes: EdgeChange<FlowEdge>[]) => void
@@ -52,9 +57,24 @@ export const useFlowStore = create<FlowState>()(
       graph: blankGraph(),
       selection: null,
       savedAt: null,
-      setGraph: (graph) => set({ graph: touch(graph), selection: null }),
+      setGraph: (graph) => set({ graph: touch(normalizeFlowGraph(graph)), selection: null }),
       newFlow: () => set({ graph: blankGraph(), selection: null }),
       loadDemo: () => set({ graph: createDemoFlow(), selection: null }),
+      loadCardDemo: () => set({ graph: createCardNumberDemo(), selection: null }),
+      addVariable: (patch = {}) => {
+        const variable = createFlowVariable(patch)
+        set((state) => ({ graph: touch({ ...state.graph, variables: [...state.graph.variables, variable] }) }))
+        return variable
+      },
+      updateVariable: (variableId, patch) => set((state) => ({
+        graph: touch({
+          ...state.graph,
+          variables: state.graph.variables.map((variable) => variable.id === variableId ? { ...variable, ...patch } : variable),
+        }),
+      })),
+      removeVariable: (variableId) => set((state) => ({
+        graph: touch({ ...state.graph, variables: state.graph.variables.filter((variable) => variable.id !== variableId) }),
+      })),
       addNode: (type, position) => set((state) => {
         const node = createFlowNode(type, position, id('node'))
         return { graph: touch({ ...state.graph, nodes: [...state.graph.nodes, node] }), selection: { kind: 'node', id: node.id } }
@@ -123,6 +143,10 @@ export const useFlowStore = create<FlowState>()(
     {
       name: 'flow-logic-studio-v01',
       partialize: (state) => ({ graph: state.graph, savedAt: state.savedAt }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<FlowState>
+        return { ...current, ...saved, graph: saved.graph ? normalizeFlowGraph(saved.graph) : current.graph }
+      },
     },
   ),
 )

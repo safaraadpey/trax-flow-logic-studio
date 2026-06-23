@@ -57,12 +57,68 @@ export function createDemoFlow(): FlowGraph {
     nodes,
     edges,
     variables: [
-      { name: 'roomCountShuffle', type: 'number', defaultValue: 0, description: 'Random room capacity for the keeper window.' },
-      { name: 'keeperMinutes', type: 'number', defaultValue: 2, description: 'Minutes before a new shuffle is generated.' },
-      { name: 'waitingRooms', type: 'number', defaultValue: 0, description: 'Current waiting room count.' },
+      { id: 'var_min_room_count', name: 'minRoomCount', type: 'number', defaultValue: 1, description: 'Minimum randomized room cap.', scope: 'global' },
+      { id: 'var_max_room_count', name: 'maxRoomCount', type: 'number', defaultValue: 7, description: 'Maximum randomized room cap.', scope: 'global' },
+      { id: 'var_min_normal_players', name: 'minNormalPlayers', type: 'number', defaultValue: 4, description: 'Minimum players required for another room.', scope: 'global' },
+      { id: 'var_room_shuffle', name: 'roomCountShuffle', type: 'number', defaultValue: 0, description: 'Random room capacity for the keeper window.', scope: 'nodeOutput' },
+      { id: 'var_keeper_minutes', name: 'keeperMinutes', type: 'number', defaultValue: 2, description: 'Minutes before a new shuffle is generated.', scope: 'nodeOutput' },
+      { id: 'var_waiting_rooms', name: 'waitingRooms', type: 'number', defaultValue: 0, description: 'Current waiting room count.', scope: 'nodeOutput' },
+      { id: 'var_normal_players', name: 'normalPlayers', type: 'number', defaultValue: 0, description: 'Current normal player count.', scope: 'nodeOutput' },
     ],
     inputs: [{ name: 'now', type: 'datetime', description: 'Scheduler tick time.' }],
     outputs: [{ name: 'status', type: 'string', description: 'Final scheduler status.' }],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createCardNumberDemo(): FlowGraph {
+  const specs: Array<[string, FlowNodeType, string, number, number, Record<string, unknown>?]> = [
+    ['card_start', 'StartNode', 'Start Card Loop', 80, 180, { triggerType: 'manual' }],
+    ['card_check', 'ConditionNode', 'currentCardNumber < maxCardNumber?', 370, 180, { left: 'currentCardNumber', operator: 'less_than', right: 'maxCardNumber', trueLabel: 'true', falseLabel: 'false' }],
+    ['card_read', 'LogNode', 'Read Current Card Number', 680, 70, { message: 'Current card: ${currentCardNumber}', level: 'info' }],
+    ['card_increment', 'AssignVariableNode', 'Increment Current Card Number', 970, 70, { variableName: 'currentCardNumber', valueExpression: 'currentCardNumber + 1' }],
+    ['card_continue', 'AssignVariableNode', 'Set Should Continue', 1260, 70, { variableName: 'shouldContinue', valueExpression: 'currentCardNumber < maxCardNumber' }],
+    ['card_end', 'EndNode', 'End Card Loop', 680, 290, { resultStatus: 'success' }],
+  ]
+
+  const nodes = specs.map(([nodeId, type, label, x, y, config]) => {
+    const node = createFlowNode(type, { x, y }, nodeId)
+    node.data.label = label
+    node.data.description = label
+    if (config) node.data.config = { ...node.data.config, ...config }
+    return node
+  })
+
+  const link = (source: string, target: string, label = ''): FlowEdge => ({
+    id: `e_${source}_${target}_${label || 'next'}`,
+    source,
+    target,
+    sourceHandle: label === 'true' || label === 'false' ? label : undefined,
+    data: { label, condition: label },
+  })
+
+  const now = new Date().toISOString()
+  return {
+    id: 'card_number_increment_demo',
+    name: 'Card Number Increment Loop',
+    description: 'Reads and increments a card number until the configured maximum is reached.',
+    nodes,
+    edges: [
+      link('card_start', 'card_check'),
+      link('card_check', 'card_read', 'true'),
+      link('card_check', 'card_end', 'false'),
+      link('card_read', 'card_increment'),
+      link('card_increment', 'card_continue'),
+      link('card_continue', 'card_check'),
+    ],
+    variables: [
+      { id: 'var_current_card', name: 'currentCardNumber', type: 'number', defaultValue: 1, description: 'Card number currently being processed.', scope: 'global' },
+      { id: 'var_max_card', name: 'maxCardNumber', type: 'number', defaultValue: 75, description: 'Highest card number allowed.', scope: 'input' },
+      { id: 'var_should_continue', name: 'shouldContinue', type: 'boolean', defaultValue: true, description: 'Computed loop continuation flag.', scope: 'computed' },
+    ],
+    inputs: [{ name: 'maxCardNumber', type: 'number', description: 'Maximum card number.' }],
+    outputs: [{ name: 'currentCardNumber', type: 'number', description: 'Final card number.' }],
     createdAt: now,
     updatedAt: now,
   }

@@ -1,6 +1,7 @@
 import type { AIProvider } from '../AIProvider'
 import type { FlowGraph } from '../../types/flow'
 import { validateFlow } from '../../lib/validateFlow'
+import { normalizeFlowGraph } from '../../lib/flowVariables'
 
 const API_URL = '/api/gemini'
 const DEFAULT_MODEL = 'gemini-3.5-flash'
@@ -14,6 +15,9 @@ interface GeminiInteractionResponse {
 const FLOW_CONTRACT = `
 Return only valid JSON for a FlowGraph. Do not use markdown fences.
 FlowGraph fields: id, name, description, nodes, edges, variables, inputs, outputs, createdAt, updatedAt.
+Every variable must have: id, unique valid JavaScript identifier name, type, defaultValue, description, and scope.
+Variable scope must be one of: global, nodeOutput, input, computed.
+All node variable references must reuse entries in variables; never create duplicate variable names.
 Every node must have: id, type:"semantic", position:{x:number,y:number}, data.
 Node data must have: type, label, description, inputs:[], outputs:[], config:{}, logic:{}, ui:{}.
 Allowed semantic node data.type values: StartNode, EndNode, ActionNode, ConditionNode, RandomNode, TimerNode, DbQueryNode, AssignVariableNode, LogNode.
@@ -41,6 +45,7 @@ function parseFlow(text: string): FlowGraph {
   } catch {
     throw new Error('Gemini returned invalid FlowGraph JSON.')
   }
+  flow = normalizeFlowGraph(flow)
   const issues = validateFlow(flow)
   const errors = issues.filter((issue) => issue.level === 'error')
   if (errors.length) throw new Error(`Gemini generated an invalid flow: ${errors.map((issue) => issue.message).join(' ')}`)

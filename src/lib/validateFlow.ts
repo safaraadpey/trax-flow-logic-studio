@@ -10,6 +10,16 @@ export function validateFlow(graph: FlowGraph): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   const starts = graph.nodes.filter((node) => node.data.type === 'StartNode')
   const ends = graph.nodes.filter((node) => node.data.type === 'EndNode')
+  const variableNames = new Set(graph.variables.map((variable) => variable.name))
+  const seenNames = new Set<string>()
+  const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+  const literals = new Set(['true', 'false', 'null', 'undefined'])
+
+  for (const variable of graph.variables) {
+    if (seenNames.has(variable.name)) issues.push({ level: 'error', message: `Variable name "${variable.name}" must be unique.` })
+    seenNames.add(variable.name)
+    if (!identifier.test(variable.name)) issues.push({ level: 'error', message: `Variable name "${variable.name}" is not a valid JavaScript identifier.` })
+  }
 
   if (starts.length !== 1) issues.push({ level: 'error', message: `Flow must have exactly one Start node (found ${starts.length}).` })
   if (ends.length < 1) issues.push({ level: 'error', message: 'Flow must have at least one End node.' })
@@ -22,9 +32,26 @@ export function validateFlow(graph: FlowGraph): ValidationIssue[] {
       if (!handles.has('true') || !handles.has('false')) {
         issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" needs true and false outgoing edges.` })
       }
+      for (const key of ['left', 'right']) {
+        const operand = String(node.data.config[key] || '').trim()
+        if (identifier.test(operand) && !literals.has(operand) && !variableNames.has(operand)) {
+          issues.push({ level: 'warning', nodeId: node.id, message: `"${node.data.label}" references unknown variable "${operand}".` })
+        }
+      }
     }
-    if (node.data.type === 'RandomNode' && !String(node.data.config.outputVariable || '').trim()) {
-      issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" must define outputVariable.` })
+    if (node.data.type === 'RandomNode' || node.data.type === 'DbQueryNode') {
+      const outputVariable = String(node.data.config.outputVariable || '').trim()
+      if (!outputVariable) {
+        issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" must define outputVariable.` })
+      } else if (!variableNames.has(outputVariable)) {
+        issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" outputVariable "${outputVariable}" must exist in flow variables.` })
+      }
+    }
+    if (node.data.type === 'AssignVariableNode') {
+      const variableName = String(node.data.config.variableName || '').trim()
+      if (!variableName || !variableNames.has(variableName)) {
+        issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" variableName "${variableName || '(empty)'}" must exist in flow variables.` })
+      }
     }
     if (node.data.type !== 'StartNode' && incoming.length === 0) {
       issues.push({ level: 'warning', nodeId: node.id, message: `"${node.data.label}" has no incoming edge.` })

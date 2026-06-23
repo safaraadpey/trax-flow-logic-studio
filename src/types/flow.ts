@@ -14,6 +14,7 @@ export const nodeTypes = [
 
 export type FlowNodeType = (typeof nodeTypes)[number]
 export type VariableType = 'string' | 'number' | 'boolean' | 'datetime' | 'object' | 'array'
+export type VariableScope = 'global' | 'nodeOutput' | 'input' | 'computed'
 
 export interface FlowPort {
   name: string
@@ -42,10 +43,12 @@ export interface FlowEdgeData extends Record<string, unknown> {
 export type FlowEdge = Edge<FlowEdgeData>
 
 export interface FlowVariable {
+  id: string
   name: string
   type: VariableType
-  defaultValue: unknown
-  description: string
+  defaultValue?: unknown
+  description?: string
+  scope: VariableScope
 }
 
 export interface FlowGraph {

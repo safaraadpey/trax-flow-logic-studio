@@ -6,7 +6,7 @@ import {
 import {
   AlignHorizontalSpaceAround, Box, Braces, CheckCircle2, ChevronDown, Clock3,
   Database, Dice5, Download, FileJson, Flag, FolderOpen, GitBranch,
-  Grid3X3, PanelBottom, Play, Plus, Save, ScrollText, Settings2, Trash2, Upload, XCircle,
+  Grid3X3, PanelBottom, Play, Plus, Save, ScrollText, Settings2, Trash2, Upload, Variable, XCircle,
 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { nodeLabels, nodeTypes as supportedNodeTypes, type FlowNodeType, type FlowPort } from './types/flow'
@@ -20,6 +20,7 @@ import { AICopilotPanel } from './components/ai/AICopilotPanel'
 import { AISettingsDialog } from './components/ai/AISettingsDialog'
 import { useAISettingsStore } from './store/aiSettingsStore'
 import { aiService } from './ai/aiService'
+import { VariablesPanel } from './components/variables/VariablesPanel'
 
 const semanticNodeTypes: NodeTypes = { semantic: SemanticNode }
 type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation' | 'ai-explanation'
@@ -36,18 +37,18 @@ const paletteMeta: Record<FlowNodeType, { icon: typeof Flag; color: string; desc
   LogNode: { icon: ScrollText, color: '#fb923c', description: 'Write a log entry' },
 }
 
-const configFields: Record<FlowNodeType, Array<{ key: string; label: string; type?: 'select' | 'number' | 'textarea' | 'datetime'; options?: string[] }>> = {
+const configFields: Record<FlowNodeType, Array<{ key: string; label: string; type?: 'select' | 'number' | 'textarea' | 'datetime'; options?: string[]; variableAware?: boolean }>> = {
   StartNode: [{ key: 'triggerType', label: 'Trigger type', type: 'select', options: ['manual', 'scheduler_tick', 'webhook', 'event'] }],
   EndNode: [{ key: 'resultStatus', label: 'Result status', type: 'select', options: ['success', 'stopped', 'failed'] }],
   ActionNode: [
     { key: 'actionName', label: 'Action name' },
-    { key: 'inputMapping', label: 'Input mapping', type: 'textarea' },
-    { key: 'outputMapping', label: 'Output mapping', type: 'textarea' },
+    { key: 'inputMapping', label: 'Input mapping', type: 'textarea', variableAware: true },
+    { key: 'outputMapping', label: 'Output mapping', type: 'textarea', variableAware: true },
   ],
   ConditionNode: [
-    { key: 'left', label: 'Left expression' },
+    { key: 'left', label: 'Left expression', variableAware: true },
     { key: 'operator', label: 'Operator', type: 'select', options: ['equals', 'not_equals', 'greater_than', 'less_than', 'greater_or_equal', 'less_or_equal', 'between', 'contains', 'exists', 'not_exists'] },
-    { key: 'right', label: 'Right expression' },
+    { key: 'right', label: 'Right expression', variableAware: true },
     { key: 'trueLabel', label: 'True label' },
     { key: 'falseLabel', label: 'False label' },
   ],
@@ -55,7 +56,7 @@ const configFields: Record<FlowNodeType, Array<{ key: string; label: string; typ
     { key: 'mode', label: 'Mode', type: 'select', options: ['number_between', 'coin_flip', 'pick_from_list'] },
     { key: 'min', label: 'Minimum' }, { key: 'max', label: 'Maximum' },
     { key: 'listValues', label: 'List values', type: 'textarea' },
-    { key: 'outputVariable', label: 'Output variable' },
+    { key: 'outputVariable', label: 'Output variable', variableAware: true },
   ],
   TimerNode: [
     { key: 'mode', label: 'Mode', type: 'select', options: ['wait_for_duration', 'wait_until'] },
@@ -66,9 +67,9 @@ const configFields: Record<FlowNodeType, Array<{ key: string; label: string; typ
   DbQueryNode: [
     { key: 'queryName', label: 'Query name' }, { key: 'table', label: 'Table' },
     { key: 'operation', label: 'Operation', type: 'select', options: ['select', 'insert', 'update', 'delete', 'count'] },
-    { key: 'filters', label: 'Filters JSON', type: 'textarea' }, { key: 'outputVariable', label: 'Output variable' },
+    { key: 'filters', label: 'Filters JSON', type: 'textarea' }, { key: 'outputVariable', label: 'Output variable', variableAware: true },
   ],
-  AssignVariableNode: [{ key: 'variableName', label: 'Variable name' }, { key: 'valueExpression', label: 'Value expression', type: 'textarea' }],
+  AssignVariableNode: [{ key: 'variableName', label: 'Variable name', variableAware: true }, { key: 'valueExpression', label: 'Value expression', type: 'textarea', variableAware: true }],
   LogNode: [{ key: 'message', label: 'Message', type: 'textarea' }, { key: 'level', label: 'Level', type: 'select', options: ['info', 'warn', 'error'] }],
 }
 
@@ -82,7 +83,7 @@ function download(name: string, content: string, type = 'text/plain') {
 }
 
 function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISettings: () => void }) {
-  const { graph, newFlow, loadDemo, save, autoLayout, savedAt } = useFlowStore()
+  const { graph, newFlow, loadDemo, loadCardDemo, save, autoLayout, savedAt } = useFlowStore()
   const mermaidText = useMemo(() => exportMermaid(graph), [graph])
   return (
     <header className="toolbar">
@@ -94,6 +95,7 @@ function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISetting
         <button onClick={newFlow}><Plus size={15} />New Flow</button>
         <button onClick={save}><Save size={15} />Save</button>
         <button onClick={loadDemo} className="accent"><Play size={15} />Load Demo</button>
+        <button onClick={loadCardDemo}><Play size={15} />Card Loop</button>
         <span className="separator" />
         <button onClick={autoLayout}><AlignHorizontalSpaceAround size={15} />Auto layout</button>
         <button onClick={onImport}><Upload size={15} />Import Mermaid</button>
@@ -107,27 +109,35 @@ function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISetting
 }
 
 function Palette() {
+  const [tab, setTab] = useState<'nodes' | 'variables'>('nodes')
   const onDragStart = (event: React.DragEvent, type: FlowNodeType) => {
     event.dataTransfer.setData('application/flow-node', type)
     event.dataTransfer.effectAllowed = 'move'
   }
   return (
     <aside className="palette">
-      <div className="panel-title"><span>NODE PALETTE</span><Grid3X3 size={14} /></div>
-      <p className="panel-hint">Drag a semantic node onto the canvas.</p>
-      <div className="palette-list">
-        {supportedNodeTypes.map((type) => {
-          const item = paletteMeta[type]
-          const Icon = item.icon
-          return (
-            <div className="palette-item" draggable onDragStart={(event) => onDragStart(event, type)} key={type}>
-              <div className="palette-icon" style={{ color: item.color, background: `${item.color}18` }}><Icon size={16} /></div>
-              <div><strong>{nodeLabels[type]}</strong><span>{item.description}</span></div>
-            </div>
-          )
-        })}
+      <div className="sidebar-tabs">
+        <button className={tab === 'nodes' ? 'active' : ''} onClick={() => setTab('nodes')}><Grid3X3 size={13} />Nodes</button>
+        <button className={tab === 'variables' ? 'active' : ''} onClick={() => setTab('variables')}><Variable size={13} />Variables</button>
       </div>
-      <div className="palette-tip"><strong>Quick tip</strong><span>Connect from a node’s right handle to the next node.</span></div>
+      {tab === 'nodes' ? (
+        <>
+          <p className="panel-hint">Drag a semantic node onto the canvas.</p>
+          <div className="palette-list">
+            {supportedNodeTypes.map((type) => {
+              const item = paletteMeta[type]
+              const Icon = item.icon
+              return (
+                <div className="palette-item" draggable onDragStart={(event) => onDragStart(event, type)} key={type}>
+                  <div className="palette-icon" style={{ color: item.color, background: `${item.color}18` }}><Icon size={16} /></div>
+                  <div><strong>{nodeLabels[type]}</strong><span>{item.description}</span></div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="palette-tip"><strong>Quick tip</strong><span>Connect from a node’s right handle to the next node.</span></div>
+        </>
+      ) : <VariablesPanel />}
     </aside>
   )
 }
@@ -152,7 +162,7 @@ function PortEditor({ title, ports, onChange }: { title: string; ports: FlowPort
 }
 
 function Inspector() {
-  const { graph, selection, updateNode, updateNodeConfig, updateEdge, removeSelected } = useFlowStore()
+  const { graph, selection, updateNode, updateNodeConfig, updateEdge, removeSelected, addVariable } = useFlowStore()
   const node = selection?.kind === 'node' ? graph.nodes.find((item) => item.id === selection.id) : undefined
   const edge = selection?.kind === 'edge' ? graph.edges.find((item) => item.id === selection.id) : undefined
 
@@ -171,6 +181,15 @@ function Inspector() {
             <div className="section-title">LOGIC & CONFIG</div>
             {configFields[node.data.type].map((field) => {
               const value = String(node.data.config[field.key] ?? '')
+              const variableNames = graph.variables.map((variable) => variable.name).filter(Boolean)
+              const canAutoCreate = ['outputVariable', 'variableName'].includes(field.key)
+                && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value)
+                && !variableNames.includes(value)
+              const insertVariable = (variableName: string) => {
+                if (!variableName) return
+                const next = value && field.type === 'textarea' ? `${value}\n${variableName}` : variableName
+                updateNodeConfig(node.id, field.key, next)
+              }
               return (
                 <label key={field.key}>{field.label}
                   {field.type === 'select' ? (
@@ -178,9 +197,42 @@ function Inspector() {
                       {field.options?.map((option) => <option key={option}>{option}</option>)}
                     </select>
                   ) : field.type === 'textarea' ? (
-                    <textarea rows={2} value={value} onChange={(e) => updateNodeConfig(node.id, field.key, e.target.value)} />
+                    <>
+                      <textarea rows={2} value={value} onChange={(e) => updateNodeConfig(node.id, field.key, e.target.value)} />
+                      {field.variableAware && (
+                        <select className="variable-picker" value="" onChange={(event) => insertVariable(event.target.value)}>
+                          <option value="">Insert variable…</option>
+                          {variableNames.map((name) => <option value={name} key={name}>{name}</option>)}
+                        </select>
+                      )}
+                    </>
                   ) : (
-                    <input type={field.type || 'text'} value={value} onChange={(e) => updateNodeConfig(node.id, field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />
+                    <>
+                      <input
+                        list={field.variableAware ? `variables-${node.id}-${field.key}` : undefined}
+                        type={field.type || 'text'}
+                        value={value}
+                        onChange={(e) => updateNodeConfig(node.id, field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
+                      />
+                      {field.variableAware && (
+                        <datalist id={`variables-${node.id}-${field.key}`}>
+                          {variableNames.map((name) => <option value={name} key={name} />)}
+                        </datalist>
+                      )}
+                      {canAutoCreate && (
+                        <button
+                          className="create-variable-offer"
+                          onClick={() => addVariable({
+                            name: value,
+                            type: node.data.type === 'RandomNode' ? 'number' : 'string',
+                            scope: field.key === 'outputVariable' ? 'nodeOutput' : 'global',
+                            description: `Created from ${node.data.label}.`,
+                          })}
+                        >
+                          <Plus size={11} />Create variable {value}?
+                        </button>
+                      )}
+                    </>
                   )}
                 </label>
               )

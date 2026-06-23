@@ -8,10 +8,10 @@ function lineFor(node: FlowNode) {
     case 'ActionNode': return `await actions.${c.actionName || 'run'}(context)`
     case 'RandomNode':
       return c.mode === 'coin_flip'
-        ? `const ${c.outputVariable || 'result'} = Math.random() >= 0.5`
-        : `const ${c.outputVariable || 'result'} = randomBetween(${c.min ?? 0}, ${c.max ?? 10})`
+        ? `context.${c.outputVariable || 'result'} = Math.random() >= 0.5`
+        : `context.${c.outputVariable || 'result'} = randomBetween(${c.min ?? 0}, ${c.max ?? 10})`
     case 'TimerNode': return c.mode === 'wait_until' ? `await waitUntil("${c.untilDatetime}")` : `await waitFor(${c.durationValue}, "${c.durationUnit}")`
-    case 'DbQueryNode': return `const ${c.outputVariable || 'rows'} = await db.${c.operation}("${c.table}") // modeled query`
+    case 'DbQueryNode': return `context.${c.outputVariable || 'rows'} = await db.${c.operation}("${c.table}") // modeled query`
     case 'AssignVariableNode': return `context.${c.variableName || 'value'} = ${c.valueExpression || 'undefined'}`
     case 'LogNode': return `logger.${c.level}(${JSON.stringify(c.message || node.data.label)})`
     case 'ConditionNode': return `if (${c.left || 'value'} ${operator(c.operator)} ${c.right || 'expected'}) { /* true branch */ } else { /* false branch */ }`
@@ -35,10 +35,22 @@ export function exportTypescript(graph: FlowGraph) {
   }
   visit(start)
   graph.nodes.forEach(visit)
+  const typeFor = (type: string) => ({
+    string: 'string',
+    number: 'number',
+    boolean: 'boolean',
+    datetime: 'Date',
+    object: 'Record<string, unknown>',
+    array: 'unknown[]',
+  }[type] || 'unknown')
 
   return [
     `// Generated from Flow Logic Studio: ${graph.name}`,
-    'async function runFlow(context: Record<string, unknown>) {',
+    'type FlowContext = {',
+    ...graph.variables.map((variable) => `  ${variable.name}: ${typeFor(variable.type)}`),
+    '}',
+    '',
+    'async function runFlow(context: FlowContext) {',
     ...ordered.map((node) => `  ${lineFor(node)}`),
     '}',
   ].join('\n')

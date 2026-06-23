@@ -75,6 +75,8 @@ The browser sends AI requests to `/api/gemini`; the Vercel Function forwards the
 
 Supported nodes: Start, End, Action, Condition, Random, Timer, DB Query, Assign Variable, and Log.
 
+Global variables are managed from the Variables tab in the left sidebar. Each `FlowVariable` has a stable ID, JavaScript-safe unique name, type, default value, description, and one of four scopes: `global`, `nodeOutput`, `input`, or `computed`. Node inspectors reuse this registry through variable pickers, while validation catches missing or invalid references.
+
 ## Export and import
 
 - JSON exports the complete semantic graph.
