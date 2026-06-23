@@ -79,6 +79,16 @@ Global variables are managed from the Variables tab in the left sidebar. Each `F
 
 Timer nodes support constant, variable, and expression-based durations, plus fixed, variable, and expression-based wait-until targets. Variable duration inputs must be numeric; wait-until variables must use the `datetime` type.
 
+## Local Flow Simulator
+
+The Simulation bottom tab executes the semantic graph without calling databases, APIs, or backend services.
+
+- Step mode highlights the active node and advances one semantic node at a time.
+- Full mode runs until an End node, validation/runtime failure, unresolved DB mock, or the 100-step loop guard.
+- Simulation Inputs initialize an isolated runtime context from `FlowGraph.variables`.
+- DB queries and actions are mocked, timers complete instantly, and each step appends a context snapshot to the execution trace.
+- Expressions are parsed by a small safe evaluator; the simulator never uses `eval`.
+
 ## Export and import
 
 - `.flx` is the native project format. It preserves the complete graph, variables, semantic node configs, AI provider metadata, inspector selection, and canvas viewport.

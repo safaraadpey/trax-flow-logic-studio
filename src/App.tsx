@@ -21,6 +21,8 @@ import { AISettingsDialog } from './components/ai/AISettingsDialog'
 import { useAISettingsStore } from './store/aiSettingsStore'
 import { aiService } from './ai/aiService'
 import { VariablesPanel } from './components/variables/VariablesPanel'
+import { SimulationPanel } from './components/simulation/SimulationPanel'
+import { useSimulationStore } from './store/simulationStore'
 import {
   clearCurrentProjectHandle,
   createFlowProject,
@@ -30,7 +32,7 @@ import {
 } from './lib/projectPersistence'
 
 const semanticNodeTypes: NodeTypes = { semantic: SemanticNode }
-type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation' | 'ai-explanation'
+type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation' | 'ai-explanation' | 'simulation'
 
 const paletteMeta: Record<FlowNodeType, { icon: typeof Flag; color: string; description: string }> = {
   StartNode: { icon: Flag, color: '#34d399', description: 'Trigger the flow' },
@@ -452,10 +454,10 @@ function BottomPanel() {
     return () => { active = false }
   }, [tab, graph, activeProviderId])
   return (
-    <section className={`bottom-panel ${expanded ? '' : 'collapsed'}`}>
+    <section className={`bottom-panel ${expanded ? '' : 'collapsed'} ${tab === 'simulation' ? 'simulation-open' : ''}`}>
       <div className="bottom-tabs">
         <button className="collapse-button" onClick={() => setExpanded(!expanded)}><PanelBottom size={14} /></button>
-        {(['json', 'mermaid', 'typescript', 'validation', 'ai-explanation'] as BottomTab[]).map((name) => (
+        {(['json', 'mermaid', 'typescript', 'validation', 'ai-explanation', 'simulation'] as BottomTab[]).map((name) => (
           <button className={tab === name ? 'active' : ''} onClick={() => { setTab(name); setExpanded(true) }} key={name}>
             {name === 'validation' && <span className={`issue-count ${issues.some((i) => i.level === 'error') ? 'has-error' : ''}`}>{issues.length}</span>}
             {name === 'typescript' ? 'TypeScript' : name === 'ai-explanation' ? 'AI Explanation' : name[0].toUpperCase() + name.slice(1)}
@@ -464,7 +466,7 @@ function BottomPanel() {
       </div>
       {expanded && (
         <div className="bottom-content">
-          {tab === 'validation' ? (
+          {tab === 'simulation' ? <SimulationPanel /> : tab === 'validation' ? (
             <div className="validation-list">
               {issues.length === 0 ? <div className="valid-message"><CheckCircle2 size={18} />Flow is valid and ready to export.</div> : issues.map((issue, index) => (
                 <div className={`validation-item ${issue.level}`} key={`${issue.message}-${index}`}>
@@ -491,6 +493,23 @@ function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null)
   const { screenToFlowPosition, fitView } = useReactFlow()
   const { graph, viewport, fitViewVersion, setViewport, onNodesChange, onEdgesChange, onConnect, select, addNode } = useFlowStore()
+  const simulation = useSimulationStore((state) => state.state)
+  const simulationNodes = useMemo(() => graph.nodes.map((node) => {
+    let simulationClass = 'sim-not-visited'
+    if (simulation.failedNodeIds.includes(node.id)) simulationClass = 'sim-failed'
+    else if (simulation.currentNodeId === node.id) simulationClass = 'sim-active'
+    else if (simulation.completedNodeIds.includes(node.id)) simulationClass = 'sim-completed'
+    else if (simulation.skippedNodeIds.includes(node.id)) simulationClass = 'sim-skipped'
+    return { ...node, className: `${node.className || ''} ${simulationClass}`.trim() }
+  }), [graph.nodes, simulation])
+  const simulationEdges = useMemo(() => {
+    const latestEdgeId = simulation.takenEdgeIds[simulation.takenEdgeIds.length - 1]
+    return graph.edges.map((edge) => ({
+      ...edge,
+      className: `${edge.className || ''} ${edge.id === latestEdgeId ? 'sim-active-edge' : simulation.takenEdgeIds.includes(edge.id) ? 'sim-taken-edge' : ''}`.trim(),
+      animated: edge.id === latestEdgeId,
+    }))
+  }, [graph.edges, simulation.takenEdgeIds])
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
     const type = event.dataTransfer.getData('application/flow-node') as FlowNodeType
@@ -508,8 +527,8 @@ function Canvas() {
     <main className="canvas" ref={wrapper} onDrop={onDrop} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}>
       <div className="canvas-title"><strong>{graph.name}</strong><span>{graph.nodes.length} nodes · {graph.edges.length} edges</span></div>
       <ReactFlow
-        nodes={graph.nodes}
-        edges={graph.edges}
+        nodes={simulationNodes}
+        edges={simulationEdges}
         nodeTypes={semanticNodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
