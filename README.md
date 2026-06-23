@@ -89,6 +89,8 @@ The Simulation bottom tab executes the semantic graph without calling databases,
 - DB queries and actions are mocked, timers complete instantly, and each step appends a context snapshot to the execution trace.
 - Expressions are parsed by a small safe evaluator; the simulator never uses `eval`.
 
+The Inspector supports a persisted right-docked mode and a draggable floating mode. Use its header control or `Ctrl+I` to switch layouts.
+
 ## Export and import
 
 - `.flx` is the native project format. It preserves the complete graph, variables, semantic node configs, AI provider metadata, inspector selection, and canvas viewport.

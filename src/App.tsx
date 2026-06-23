@@ -6,7 +6,7 @@ import {
 import {
   AlignHorizontalSpaceAround, Box, Braces, CheckCircle2, ChevronDown, Clock3,
   Database, Dice5, Download, FileJson, FilePlus2, Flag, FolderOpen, GitBranch,
-  Grid3X3, PanelBottom, Play, Plus, Save, SaveAll, ScrollText, Settings2, Trash2, Upload, Variable, XCircle,
+  Grid3X3, PanelBottom, PanelRight, Pin, Play, Plus, Save, SaveAll, ScrollText, Settings2, Trash2, Upload, Variable, X, XCircle,
 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { nodeLabels, nodeTypes as supportedNodeTypes, type FlowNodeType, type FlowPort } from './types/flow'
@@ -23,6 +23,7 @@ import { aiService } from './ai/aiService'
 import { VariablesPanel } from './components/variables/VariablesPanel'
 import { SimulationPanel } from './components/simulation/SimulationPanel'
 import { useSimulationStore } from './store/simulationStore'
+import { useUIStore } from './store/uiStore'
 import {
   clearCurrentProjectHandle,
   createFlowProject,
@@ -321,12 +322,80 @@ function TimerConfigEditor({ nodeId, config }: { nodeId: string; config: Record<
 
 function Inspector() {
   const { graph, selection, updateNode, updateNodeConfig, updateEdge, removeSelected, addVariable } = useFlowStore()
+  const {
+    inspectorMode,
+    inspectorOpen,
+    inspectorPosition,
+    toggleInspectorMode,
+    closeInspector,
+    setInspectorPosition,
+  } = useUIStore()
+  const inspectorRef = useRef<HTMLElement>(null)
+  const dragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
   const node = selection?.kind === 'node' ? graph.nodes.find((item) => item.id === selection.id) : undefined
   const edge = selection?.kind === 'edge' ? graph.edges.find((item) => item.id === selection.id) : undefined
 
+  if (!inspectorOpen || (inspectorMode === 'floating' && !node)) return null
+
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspectorMode !== 'floating' || (event.target as HTMLElement).closest('button')) return
+    const bounds = inspectorRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    dragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - bounds.left,
+      offsetY: event.clientY - bounds.top,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const drag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current || dragRef.current.pointerId !== event.pointerId) return
+    const workspace = inspectorRef.current?.parentElement?.getBoundingClientRect()
+    const panel = inspectorRef.current?.getBoundingClientRect()
+    if (!workspace || !panel) return
+    const x = Math.min(
+      Math.max(0, event.clientX - workspace.left - dragRef.current.offsetX),
+      Math.max(0, workspace.width - panel.width),
+    )
+    const y = Math.min(
+      Math.max(0, event.clientY - workspace.top - dragRef.current.offsetY),
+      Math.max(0, workspace.height - 43),
+    )
+    setInspectorPosition({ x, y })
+  }
+
+  const stopDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null
+  }
+
   return (
-    <aside className="inspector">
-      <div className="panel-title"><span>INSPECTOR</span>{selection && <button className="icon-button danger" onClick={removeSelected}><Trash2 size={14} /></button>}</div>
+    <aside
+      ref={inspectorRef}
+      className={`inspector ${inspectorMode}`}
+      style={inspectorMode === 'floating' ? {
+        left: inspectorPosition.x,
+        top: inspectorPosition.y,
+        '--inspector-accent': node ? paletteMeta[node.data.type].color : '#5968a5',
+      } as React.CSSProperties : undefined}
+      onPointerDown={() => inspectorRef.current?.focus()}
+      tabIndex={-1}
+    >
+      <div className="panel-title inspector-header" onPointerDown={startDrag} onPointerMove={drag} onPointerUp={stopDrag} onPointerCancel={stopDrag}>
+        <span>INSPECTOR</span>
+        <div className="inspector-header-actions">
+          <button
+            className="icon-button"
+            title={inspectorMode === 'docked' ? 'Float Inspector' : 'Dock Inspector'}
+            aria-label={inspectorMode === 'docked' ? 'Float Inspector' : 'Dock Inspector'}
+            onClick={toggleInspectorMode}
+          >
+            {inspectorMode === 'docked' ? <PanelRight size={14} /> : <Pin size={14} />}
+          </button>
+          {selection && <button className="icon-button danger" title="Delete selected item" onClick={removeSelected}><Trash2 size={14} /></button>}
+          {inspectorMode === 'floating' && <button className="icon-button" title="Close Inspector" aria-label="Close Inspector" onClick={closeInspector}><X size={14} /></button>}
+        </div>
+      </div>
       {!selection && <div className="empty-inspector"><div><Braces size={22} /></div><strong>Nothing selected</strong><span>Select a node or edge to edit its semantic properties.</span></div>}
       {node && (
         <div className="inspector-content">
@@ -493,6 +562,9 @@ function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null)
   const { screenToFlowPosition, fitView } = useReactFlow()
   const { graph, viewport, fitViewVersion, setViewport, onNodesChange, onEdgesChange, onConnect, select, addNode } = useFlowStore()
+  const inspectorMode = useUIStore((state) => state.inspectorMode)
+  const openInspector = useUIStore((state) => state.openInspector)
+  const setInspectorPosition = useUIStore((state) => state.setInspectorPosition)
   const simulation = useSimulationStore((state) => state.state)
   const simulationNodes = useMemo(() => graph.nodes.map((node) => {
     let simulationClass = 'sim-not-visited'
@@ -516,6 +588,33 @@ function Canvas() {
     if (!supportedNodeTypes.includes(type)) return
     addNode(type, screenToFlowPosition({ x: event.clientX, y: event.clientY }))
   }, [addNode, screenToFlowPosition])
+  const selectNode = useCallback((event: React.MouseEvent, nodeId: string) => {
+    select({ kind: 'node', id: nodeId })
+    if (inspectorMode !== 'floating') return
+
+    const workspace = wrapper.current?.closest('.workspace')?.getBoundingClientRect()
+    const nodeElement = (event.target as Element).closest('.react-flow__node')
+    const nodeBounds = nodeElement?.getBoundingClientRect()
+    if (!workspace || !nodeBounds) {
+      openInspector()
+      return
+    }
+
+    const panelWidth = 320
+    const panelMinHeight = 280
+    const gap = 18
+    let x = nodeBounds.right - workspace.left + gap
+    if (x + panelWidth > workspace.width - gap) {
+      x = nodeBounds.left - workspace.left - panelWidth - gap
+    }
+    x = Math.max(gap, Math.min(x, workspace.width - panelWidth - gap))
+    const y = Math.max(
+      gap,
+      Math.min(nodeBounds.top - workspace.top - 42, workspace.height - panelMinHeight - gap),
+    )
+    setInspectorPosition({ x, y })
+    openInspector()
+  }, [inspectorMode, openInspector, select, setInspectorPosition])
 
   useEffect(() => {
     if (fitViewVersion === 0) return
@@ -533,7 +632,7 @@ function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={(_, node) => select({ kind: 'node', id: node.id })}
+        onNodeClick={(event, node) => selectNode(event, node.id)}
         onEdgeClick={(_, edge) => select({ kind: 'edge', id: edge.id })}
         onPaneClick={() => select(null)}
         viewport={viewport}
@@ -582,6 +681,8 @@ function AppShell() {
   const [notice, setNotice] = useState<{ message: string; isError: boolean } | null>(null)
   const removeSelected = useFlowStore((state) => state.removeSelected)
   const newFlow = useFlowStore((state) => state.newFlow)
+  const selection = useFlowStore((state) => state.selection)
+  const { inspectorMode, inspectorOpen, toggleInspectorMode, openInspector, closeInspector } = useUIStore()
   const showNotice = useCallback((message: string, isError = false) => {
     setNotice({ message, isError })
   }, [])
@@ -591,16 +692,29 @@ function AppShell() {
     return () => window.clearTimeout(timeout)
   }, [notice])
   useEffect(() => {
+    if (inspectorMode === 'floating') {
+      if (selection?.kind === 'node') openInspector()
+      else closeInspector()
+    } else {
+      openInspector()
+    }
+  }, [selection, inspectorMode, openInspector, closeInspector])
+  useEffect(() => {
     const listener = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
+        event.preventDefault()
+        toggleInspectorMode()
+        return
+      }
       if ((event.key === 'Delete' || event.key === 'Backspace') && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) removeSelected()
     }
     window.addEventListener('keydown', listener)
     return () => window.removeEventListener('keydown', listener)
-  }, [removeSelected])
+  }, [removeSelected, toggleInspectorMode])
   return (
     <div className="app-shell">
       <Toolbar onImport={() => setImportOpen(true)} onAISettings={() => setAISettingsOpen(true)} onNotice={showNotice} />
-      <div className="workspace"><Palette /><Canvas /><AICopilotPanel /><Inspector /></div>
+      <div className={`workspace ${inspectorMode === 'floating' || !inspectorOpen ? 'inspector-undocked' : ''}`}><Palette /><Canvas /><AICopilotPanel /><Inspector /></div>
       <BottomPanel />
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
       {aiSettingsOpen && <AISettingsDialog onClose={() => setAISettingsOpen(false)} />}
