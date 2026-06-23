@@ -18,6 +18,8 @@ FlowGraph fields: id, name, description, nodes, edges, variables, inputs, output
 Every variable must have: id, unique valid JavaScript identifier name, type, defaultValue, description, and scope.
 Variable scope must be one of: global, nodeOutput, input, computed.
 All node variable references must reuse entries in variables; never create duplicate variable names.
+TimerNode supports variable and expression timing. For duration use durationSource constant|variable|expression with durationValue, durationVariable, or durationExpression plus unit seconds|minutes|hours. For wait_until use waitUntilSource fixed_datetime|variable|expression with untilDatetime, untilVariable, or untilExpression.
+Timer duration variables must be number variables. Wait-until variables must be datetime variables.
 Every node must have: id, type:"semantic", position:{x:number,y:number}, data.
 Node data must have: type, label, description, inputs:[], outputs:[], config:{}, logic:{}, ui:{}.
 Allowed semantic node data.type values: StartNode, EndNode, ActionNode, ConditionNode, RandomNode, TimerNode, DbQueryNode, AssignVariableNode, LogNode.

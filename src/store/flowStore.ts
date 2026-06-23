@@ -1,19 +1,23 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { addEdge, applyEdgeChanges, applyNodeChanges, type Connection, type EdgeChange, type NodeChange } from '@xyflow/react'
+import { addEdge, applyEdgeChanges, applyNodeChanges, type Connection, type EdgeChange, type NodeChange, type Viewport } from '@xyflow/react'
 import type { FlowEdge, FlowGraph, FlowNode, FlowNodeData, FlowNodeType, FlowVariable } from '../types/flow'
 import { createFlowNode } from '../types/flow'
 import { createCardNumberDemo, createDemoFlow } from '../lib/demoFlow'
 import { id } from '../lib/id'
 import { createFlowVariable, normalizeFlowGraph } from '../lib/flowVariables'
 
-type Selection = { kind: 'node' | 'edge'; id: string } | null
+export type EditorSelection = { kind: 'node' | 'edge'; id: string } | null
 
 interface FlowState {
   graph: FlowGraph
-  selection: Selection
+  selection: EditorSelection
+  viewport: Viewport
+  fitViewVersion: number
   savedAt: string | null
   setGraph: (graph: FlowGraph) => void
+  loadProject: (graph: FlowGraph, selection: EditorSelection, viewport: Viewport) => void
+  setViewport: (viewport: Viewport) => void
   newFlow: () => void
   loadDemo: () => void
   loadCardDemo: () => void
@@ -24,7 +28,7 @@ interface FlowState {
   onNodesChange: (changes: NodeChange<FlowNode>[]) => void
   onEdgesChange: (changes: EdgeChange<FlowEdge>[]) => void
   onConnect: (connection: Connection) => void
-  select: (selection: Selection) => void
+  select: (selection: EditorSelection) => void
   updateNode: (nodeId: string, patch: Partial<FlowNodeData>) => void
   updateNodeConfig: (nodeId: string, key: string, value: unknown) => void
   updateEdge: (edgeId: string, patch: { label?: string; condition?: string }) => void
@@ -56,11 +60,24 @@ export const useFlowStore = create<FlowState>()(
     (set) => ({
       graph: blankGraph(),
       selection: null,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      fitViewVersion: 0,
       savedAt: null,
-      setGraph: (graph) => set({ graph: touch(normalizeFlowGraph(graph)), selection: null }),
-      newFlow: () => set({ graph: blankGraph(), selection: null }),
-      loadDemo: () => set({ graph: createDemoFlow(), selection: null }),
-      loadCardDemo: () => set({ graph: createCardNumberDemo(), selection: null }),
+      setGraph: (graph) => set((state) => ({
+        graph: touch(normalizeFlowGraph(graph)),
+        selection: null,
+        fitViewVersion: state.fitViewVersion + 1,
+      })),
+      loadProject: (graph, selection, viewport) => set({
+        graph: normalizeFlowGraph(graph),
+        selection,
+        viewport,
+        savedAt: graph.updatedAt || null,
+      }),
+      setViewport: (viewport) => set({ viewport }),
+      newFlow: () => set({ graph: blankGraph(), selection: null, viewport: { x: 0, y: 0, zoom: 1 }, savedAt: null }),
+      loadDemo: () => set((state) => ({ graph: createDemoFlow(), selection: null, fitViewVersion: state.fitViewVersion + 1 })),
+      loadCardDemo: () => set((state) => ({ graph: createCardNumberDemo(), selection: null, fitViewVersion: state.fitViewVersion + 1 })),
       addVariable: (patch = {}) => {
         const variable = createFlowVariable(patch)
         set((state) => ({ graph: touch({ ...state.graph, variables: [...state.graph.variables, variable] }) }))
@@ -142,10 +159,21 @@ export const useFlowStore = create<FlowState>()(
     }),
     {
       name: 'flow-logic-studio-v01',
-      partialize: (state) => ({ graph: state.graph, savedAt: state.savedAt }),
+      partialize: (state) => ({
+        graph: state.graph,
+        selection: state.selection,
+        viewport: state.viewport,
+        savedAt: state.savedAt,
+      }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<FlowState>
-        return { ...current, ...saved, graph: saved.graph ? normalizeFlowGraph(saved.graph) : current.graph }
+        return {
+          ...current,
+          ...saved,
+          graph: saved.graph ? normalizeFlowGraph(saved.graph) : current.graph,
+          viewport: saved.viewport || current.viewport,
+          fitViewVersion: current.fitViewVersion,
+        }
       },
     },
   ),

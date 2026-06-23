@@ -77,8 +77,12 @@ Supported nodes: Start, End, Action, Condition, Random, Timer, DB Query, Assign 
 
 Global variables are managed from the Variables tab in the left sidebar. Each `FlowVariable` has a stable ID, JavaScript-safe unique name, type, default value, description, and one of four scopes: `global`, `nodeOutput`, `input`, or `computed`. Node inspectors reuse this registry through variable pickers, while validation catches missing or invalid references.
 
+Timer nodes support constant, variable, and expression-based durations, plus fixed, variable, and expression-based wait-until targets. Variable duration inputs must be numeric; wait-until variables must use the `datetime` type.
+
 ## Export and import
 
+- `.flx` is the native project format. It preserves the complete graph, variables, semantic node configs, AI provider metadata, inspector selection, and canvas viewport.
+- The Project menu supports New, Open, Save, and Save As. Browser autosave can restore the previous editing session after a reload.
 - JSON exports the complete semantic graph.
 - Mermaid is generated from semantic nodes and edges; it is never the source of truth.
 - TypeScript output is readable pseudo-code intended as a developer handoff.
@@ -90,4 +94,3 @@ Global variables are managed from the Variables tab in the left sidebar. Each `F
 - Auto-layout is a lightweight level-based layout, not a full graph layout engine.
 - Mermaid import does not support subgraphs, styling directives, or every Mermaid edge syntax.
 - TypeScript output is structural pseudo-code and is not guaranteed to execute.
-- Variable management is represented in the graph model; a dedicated variables UI is planned for v0.2.

@@ -1,4 +1,5 @@
 import type { FlowGraph } from '../types/flow'
+import { expressionVariableReferences } from './flowVariables'
 
 export type ValidationIssue = {
   level: 'error' | 'warning'
@@ -51,6 +52,43 @@ export function validateFlow(graph: FlowGraph): ValidationIssue[] {
       const variableName = String(node.data.config.variableName || '').trim()
       if (!variableName || !variableNames.has(variableName)) {
         issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" variableName "${variableName || '(empty)'}" must exist in flow variables.` })
+      }
+    }
+    if (node.data.type === 'TimerNode') {
+      const config = node.data.config
+      if (config.mode === 'wait_for_duration') {
+        const source = String(config.durationSource || 'constant')
+        if (source === 'variable') {
+          const name = String(config.durationVariable || '')
+          const variable = graph.variables.find((item) => item.name === name)
+          if (!variable) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" duration variable "${name || '(empty)'}" does not exist.` })
+          else if (variable.type !== 'number') issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" duration variable "${name}" must be a number.` })
+        }
+        if (source === 'expression') {
+          const expression = String(config.durationExpression || '').trim()
+          if (!expression) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" requires a duration expression.` })
+          for (const reference of expressionVariableReferences(expression)) {
+            if (!variableNames.has(reference)) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" duration expression references unknown variable "${reference}".` })
+          }
+        }
+      } else {
+        const source = String(config.waitUntilSource || 'fixed_datetime')
+        if (source === 'fixed_datetime' && !String(config.untilDatetime || '').trim()) {
+          issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" requires a fixed datetime.` })
+        }
+        if (source === 'variable') {
+          const name = String(config.untilVariable || '')
+          const variable = graph.variables.find((item) => item.name === name)
+          if (!variable) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" wait-until variable "${name || '(empty)'}" does not exist.` })
+          else if (variable.type !== 'datetime') issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" wait-until variable "${name}" must be datetime-compatible.` })
+        }
+        if (source === 'expression') {
+          const expression = String(config.untilExpression || '').trim()
+          if (!expression) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" requires a wait-until expression.` })
+          for (const reference of expressionVariableReferences(expression)) {
+            if (!variableNames.has(reference)) issues.push({ level: 'error', nodeId: node.id, message: `"${node.data.label}" wait-until expression references unknown variable "${reference}".` })
+          }
+        }
       }
     }
     if (node.data.type !== 'StartNode' && incoming.length === 0) {

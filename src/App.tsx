@@ -5,8 +5,8 @@ import {
 } from '@xyflow/react'
 import {
   AlignHorizontalSpaceAround, Box, Braces, CheckCircle2, ChevronDown, Clock3,
-  Database, Dice5, Download, FileJson, Flag, FolderOpen, GitBranch,
-  Grid3X3, PanelBottom, Play, Plus, Save, ScrollText, Settings2, Trash2, Upload, Variable, XCircle,
+  Database, Dice5, Download, FileJson, FilePlus2, Flag, FolderOpen, GitBranch,
+  Grid3X3, PanelBottom, Play, Plus, Save, SaveAll, ScrollText, Settings2, Trash2, Upload, Variable, XCircle,
 } from 'lucide-react'
 import mermaid from 'mermaid'
 import { nodeLabels, nodeTypes as supportedNodeTypes, type FlowNodeType, type FlowPort } from './types/flow'
@@ -21,6 +21,13 @@ import { AISettingsDialog } from './components/ai/AISettingsDialog'
 import { useAISettingsStore } from './store/aiSettingsStore'
 import { aiService } from './ai/aiService'
 import { VariablesPanel } from './components/variables/VariablesPanel'
+import {
+  clearCurrentProjectHandle,
+  createFlowProject,
+  hasAutosavedSession,
+  openFlowProject,
+  saveFlowProject,
+} from './lib/projectPersistence'
 
 const semanticNodeTypes: NodeTypes = { semantic: SemanticNode }
 type BottomTab = 'json' | 'mermaid' | 'typescript' | 'validation' | 'ai-explanation'
@@ -60,9 +67,6 @@ const configFields: Record<FlowNodeType, Array<{ key: string; label: string; typ
   ],
   TimerNode: [
     { key: 'mode', label: 'Mode', type: 'select', options: ['wait_for_duration', 'wait_until'] },
-    { key: 'durationValue', label: 'Duration', type: 'number' },
-    { key: 'durationUnit', label: 'Unit', type: 'select', options: ['seconds', 'minutes', 'hours'] },
-    { key: 'untilDatetime', label: 'Until datetime', type: 'datetime' },
   ],
   DbQueryNode: [
     { key: 'queryName', label: 'Query name' }, { key: 'table', label: 'Table' },
@@ -82,8 +86,75 @@ function download(name: string, content: string, type = 'text/plain') {
   URL.revokeObjectURL(url)
 }
 
-function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISettings: () => void }) {
-  const { graph, newFlow, loadDemo, loadCardDemo, save, autoLayout, savedAt } = useFlowStore()
+function ProjectMenu({ onNotice }: { onNotice: (message: string, isError?: boolean) => void }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const activeProviderId = useAISettingsStore((state) => state.activeProviderId)
+  const setActiveProvider = useAISettingsStore((state) => state.setActiveProvider)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const run = async (action: () => Promise<void> | void) => {
+    setOpen(false)
+    try {
+      await action()
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return
+      onNotice(reason instanceof Error ? reason.message : String(reason), true)
+    }
+  }
+
+  const saveProject = async (saveAs: boolean) => {
+    const { graph, viewport, selection, loadProject } = useFlowStore.getState()
+    const project = createFlowProject(graph, viewport, selection, activeProviderId)
+    const filename = await saveFlowProject(project, saveAs)
+    loadProject(project.graph, selection, viewport)
+    onNotice(`Saved ${filename}`)
+  }
+
+  return (
+    <div className="project-menu" ref={menuRef}>
+      <button className="project-menu-trigger" onClick={() => setOpen((value) => !value)}>
+        <FolderOpen size={15} />Project<ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="project-menu-popover">
+          <button onClick={() => run(() => {
+            clearCurrentProjectHandle()
+            useFlowStore.getState().newFlow()
+            onNotice('New project created')
+          })}><FilePlus2 size={14} /><span><strong>New Project</strong><small>Start with an empty canvas</small></span></button>
+          <button onClick={() => run(async () => {
+            const { project, warnings, filename } = await openFlowProject()
+            useFlowStore.getState().loadProject(
+              project.graph,
+              project.editor?.selection || null,
+              project.editor?.viewport || { x: 0, y: 0, zoom: 1 },
+            )
+            const providerId = project.editor?.ai?.activeProviderId
+            if (providerId) {
+              try { setActiveProvider(providerId) } catch { warnings.push(`AI provider "${providerId}" is not registered.`) }
+            }
+            onNotice(warnings.length ? `Opened ${filename}. ${warnings.join(' ')}` : `Opened ${filename}`)
+          })}><FolderOpen size={14} /><span><strong>Open Project</strong><small>Open a native .flx file</small></span></button>
+          <div className="project-menu-separator" />
+          <button onClick={() => run(() => saveProject(false))}><Save size={14} /><span><strong>Save Project</strong><small>Save to the current .flx file</small></span></button>
+          <button onClick={() => run(() => saveProject(true))}><SaveAll size={14} /><span><strong>Save As</strong><small>Choose a new .flx file</small></span></button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Toolbar({ onImport, onAISettings, onNotice }: { onImport: () => void; onAISettings: () => void; onNotice: (message: string, isError?: boolean) => void }) {
+  const { graph, loadDemo, loadCardDemo, autoLayout, savedAt } = useFlowStore()
   const mermaidText = useMemo(() => exportMermaid(graph), [graph])
   return (
     <header className="toolbar">
@@ -92,8 +163,7 @@ function Toolbar({ onImport, onAISettings }: { onImport: () => void; onAISetting
         <div><strong>Flow Logic</strong><span>STUDIO · v0.2</span></div>
       </div>
       <div className="toolbar-actions">
-        <button onClick={newFlow}><Plus size={15} />New Flow</button>
-        <button onClick={save}><Save size={15} />Save</button>
+        <ProjectMenu onNotice={onNotice} />
         <button onClick={loadDemo} className="accent"><Play size={15} />Load Demo</button>
         <button onClick={loadCardDemo}><Play size={15} />Card Loop</button>
         <span className="separator" />
@@ -161,6 +231,92 @@ function PortEditor({ title, ports, onChange }: { title: string; ports: FlowPort
   )
 }
 
+function TimerConfigEditor({ nodeId, config }: { nodeId: string; config: Record<string, unknown> }) {
+  const graph = useFlowStore((state) => state.graph)
+  const updateNodeConfig = useFlowStore((state) => state.updateNodeConfig)
+  const mode = String(config.mode || 'wait_for_duration')
+  const durationSource = String(config.durationSource || 'constant')
+  const waitUntilSource = String(config.waitUntilSource || 'fixed_datetime')
+  const numberVariables = graph.variables.filter((variable) => variable.type === 'number')
+  const datetimeVariables = graph.variables.filter((variable) => variable.type === 'datetime')
+  const allVariables = graph.variables.filter((variable) => variable.name)
+
+  const expressionField = (key: string, label: string) => (
+    <label>{label}
+      <textarea rows={3} value={String(config[key] || '')} onChange={(event) => updateNodeConfig(nodeId, key, event.target.value)} />
+      <select className="variable-picker" value="" onChange={(event) => {
+        if (!event.target.value) return
+        const current = String(config[key] || '')
+        updateNodeConfig(nodeId, key, `${current}${current ? ' ' : ''}${event.target.value}`)
+      }}>
+        <option value="">Insert variable…</option>
+        {allVariables.map((variable) => <option value={variable.name} key={variable.id}>{variable.name}</option>)}
+      </select>
+    </label>
+  )
+
+  return (
+    <>
+      <label>Mode
+        <select value={mode} onChange={(event) => updateNodeConfig(nodeId, 'mode', event.target.value)}>
+          <option value="wait_for_duration">wait_for_duration</option>
+          <option value="wait_until">wait_until</option>
+        </select>
+      </label>
+      {mode === 'wait_for_duration' ? (
+        <>
+          <label>Duration Source
+            <select value={durationSource} onChange={(event) => updateNodeConfig(nodeId, 'durationSource', event.target.value)}>
+              <option value="constant">Constant</option>
+              <option value="variable">Variable</option>
+              <option value="expression">Expression</option>
+            </select>
+          </label>
+          {durationSource === 'constant' && (
+            <label>Duration<input type="number" value={String(config.durationValue ?? 1)} onChange={(event) => updateNodeConfig(nodeId, 'durationValue', Number(event.target.value))} /></label>
+          )}
+          {durationSource === 'variable' && (
+            <label>Variable
+              <select value={String(config.durationVariable || '')} onChange={(event) => updateNodeConfig(nodeId, 'durationVariable', event.target.value)}>
+                <option value="">Select number variable…</option>
+                {numberVariables.map((variable) => <option value={variable.name} key={variable.id}>{variable.name}</option>)}
+              </select>
+            </label>
+          )}
+          {durationSource === 'expression' && expressionField('durationExpression', 'Duration Expression')}
+          <label>Unit
+            <select value={String(config.unit || 'minutes')} onChange={(event) => updateNodeConfig(nodeId, 'unit', event.target.value)}>
+              <option value="seconds">seconds</option><option value="minutes">minutes</option><option value="hours">hours</option>
+            </select>
+          </label>
+        </>
+      ) : (
+        <>
+          <label>Wait Until Source
+            <select value={waitUntilSource} onChange={(event) => updateNodeConfig(nodeId, 'waitUntilSource', event.target.value)}>
+              <option value="fixed_datetime">Fixed Datetime</option>
+              <option value="variable">Variable</option>
+              <option value="expression">Expression</option>
+            </select>
+          </label>
+          {waitUntilSource === 'fixed_datetime' && (
+            <label>Until datetime<input type="datetime-local" value={String(config.untilDatetime || '')} onChange={(event) => updateNodeConfig(nodeId, 'untilDatetime', event.target.value)} /></label>
+          )}
+          {waitUntilSource === 'variable' && (
+            <label>Variable
+              <select value={String(config.untilVariable || '')} onChange={(event) => updateNodeConfig(nodeId, 'untilVariable', event.target.value)}>
+                <option value="">Select datetime variable…</option>
+                {datetimeVariables.map((variable) => <option value={variable.name} key={variable.id}>{variable.name}</option>)}
+              </select>
+            </label>
+          )}
+          {waitUntilSource === 'expression' && expressionField('untilExpression', 'Wait Until Expression')}
+        </>
+      )}
+    </>
+  )
+}
+
 function Inspector() {
   const { graph, selection, updateNode, updateNodeConfig, updateEdge, removeSelected, addVariable } = useFlowStore()
   const node = selection?.kind === 'node' ? graph.nodes.find((item) => item.id === selection.id) : undefined
@@ -179,7 +335,8 @@ function Inspector() {
           </section>
           <section className="inspector-section">
             <div className="section-title">LOGIC & CONFIG</div>
-            {configFields[node.data.type].map((field) => {
+            {node.data.type === 'TimerNode' && <TimerConfigEditor nodeId={node.id} config={node.data.config} />}
+            {node.data.type !== 'TimerNode' && configFields[node.data.type].map((field) => {
               const value = String(node.data.config[field.key] ?? '')
               const variableNames = graph.variables.map((variable) => variable.name).filter(Boolean)
               const canAutoCreate = ['outputVariable', 'variableName'].includes(field.key)
@@ -333,7 +490,7 @@ function BottomPanel() {
 function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null)
   const { screenToFlowPosition, fitView } = useReactFlow()
-  const { graph, onNodesChange, onEdgesChange, onConnect, select, addNode } = useFlowStore()
+  const { graph, viewport, fitViewVersion, setViewport, onNodesChange, onEdgesChange, onConnect, select, addNode } = useFlowStore()
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
     const type = event.dataTransfer.getData('application/flow-node') as FlowNodeType
@@ -342,9 +499,10 @@ function Canvas() {
   }, [addNode, screenToFlowPosition])
 
   useEffect(() => {
+    if (fitViewVersion === 0) return
     const timeout = setTimeout(() => { if (graph.nodes.length) fitView({ padding: 0.15, duration: 350 }) }, 50)
     return () => clearTimeout(timeout)
-  }, [graph.id, graph.nodes.length, fitView])
+  }, [fitViewVersion, fitView, graph.nodes.length])
 
   return (
     <main className="canvas" ref={wrapper} onDrop={onDrop} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}>
@@ -359,8 +517,9 @@ function Canvas() {
         onNodeClick={(_, node) => select({ kind: 'node', id: node.id })}
         onEdgeClick={(_, edge) => select({ kind: 'edge', id: edge.id })}
         onPaneClick={() => select(null)}
+        viewport={viewport}
+        onViewportChange={setViewport}
         deleteKeyCode={null}
-        fitView
         defaultEdgeOptions={{ animated: true, style: { stroke: '#64748b' }, labelStyle: { fill: '#cbd5e1', fontSize: 11 } }}
       >
         <Background color="#263044" gap={22} size={1} />
@@ -400,7 +559,18 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
 function AppShell() {
   const [importOpen, setImportOpen] = useState(false)
   const [aiSettingsOpen, setAISettingsOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(() => hasAutosavedSession())
+  const [notice, setNotice] = useState<{ message: string; isError: boolean } | null>(null)
   const removeSelected = useFlowStore((state) => state.removeSelected)
+  const newFlow = useFlowStore((state) => state.newFlow)
+  const showNotice = useCallback((message: string, isError = false) => {
+    setNotice({ message, isError })
+  }, [])
+  useEffect(() => {
+    if (!notice) return
+    const timeout = window.setTimeout(() => setNotice(null), 4500)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if ((event.key === 'Delete' || event.key === 'Backspace') && !(event.target instanceof HTMLInputElement) && !(event.target instanceof HTMLTextAreaElement)) removeSelected()
@@ -410,11 +580,28 @@ function AppShell() {
   }, [removeSelected])
   return (
     <div className="app-shell">
-      <Toolbar onImport={() => setImportOpen(true)} onAISettings={() => setAISettingsOpen(true)} />
+      <Toolbar onImport={() => setImportOpen(true)} onAISettings={() => setAISettingsOpen(true)} onNotice={showNotice} />
       <div className="workspace"><Palette /><Canvas /><AICopilotPanel /><Inspector /></div>
       <BottomPanel />
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
       {aiSettingsOpen && <AISettingsDialog onClose={() => setAISettingsOpen(false)} />}
+      {restoreOpen && (
+        <div className="modal-backdrop">
+          <div className="modal restore-modal">
+            <div className="modal-title"><div><strong>Restore previous session?</strong><span>An autosaved Flow Logic Studio session was found in this browser.</span></div></div>
+            <div className="restore-copy">Restore the complete graph, variables, inspector selection, and canvas viewport from your last session.</div>
+            <div className="modal-actions">
+              <button onClick={() => {
+                clearCurrentProjectHandle()
+                newFlow()
+                setRestoreOpen(false)
+              }}>Discard</button>
+              <button className="primary" onClick={() => setRestoreOpen(false)}>Restore Session</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {notice && <div className={`project-notice ${notice.isError ? 'error' : ''}`}>{notice.message}</div>}
     </div>
   )
 }

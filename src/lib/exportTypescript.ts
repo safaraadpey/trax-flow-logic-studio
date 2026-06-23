@@ -1,6 +1,7 @@
 import type { FlowGraph, FlowNode } from '../types/flow'
+import { qualifyVariableExpression } from './flowVariables'
 
-function lineFor(node: FlowNode) {
+function lineFor(node: FlowNode, variableNames: Set<string>) {
   const c = node.data.config
   switch (node.data.type) {
     case 'StartNode': return `// Start: ${node.data.label} (${c.triggerType})`
@@ -10,7 +11,19 @@ function lineFor(node: FlowNode) {
       return c.mode === 'coin_flip'
         ? `context.${c.outputVariable || 'result'} = Math.random() >= 0.5`
         : `context.${c.outputVariable || 'result'} = randomBetween(${c.min ?? 0}, ${c.max ?? 10})`
-    case 'TimerNode': return c.mode === 'wait_until' ? `await waitUntil("${c.untilDatetime}")` : `await waitFor(${c.durationValue}, "${c.durationUnit}")`
+    case 'TimerNode': {
+      if (c.mode === 'wait_until') {
+        const source = String(c.waitUntilSource || 'fixed_datetime')
+        if (source === 'variable') return `await waitUntil(context.${c.untilVariable})`
+        if (source === 'expression') return `await waitUntil(${qualifyVariableExpression(String(c.untilExpression || ''), variableNames)})`
+        return `await waitUntil(new Date("${c.untilDatetime || ''}"))`
+      }
+      const source = String(c.durationSource || 'constant')
+      const unit = ({ seconds: 'SECOND', minutes: 'MINUTE', hours: 'HOUR' } as Record<string, string>)[String(c.unit || 'minutes')] || 'MINUTE'
+      if (source === 'variable') return `await wait(context.${c.durationVariable} * ${unit})`
+      if (source === 'expression') return `await wait((${qualifyVariableExpression(String(c.durationExpression || ''), variableNames)}) * ${unit})`
+      return `await wait(${c.durationValue ?? 1} * ${unit})`
+    }
     case 'DbQueryNode': return `context.${c.outputVariable || 'rows'} = await db.${c.operation}("${c.table}") // modeled query`
     case 'AssignVariableNode': return `context.${c.variableName || 'value'} = ${c.valueExpression || 'undefined'}`
     case 'LogNode': return `logger.${c.level}(${JSON.stringify(c.message || node.data.label)})`
@@ -35,6 +48,7 @@ export function exportTypescript(graph: FlowGraph) {
   }
   visit(start)
   graph.nodes.forEach(visit)
+  const variableNames = new Set(graph.variables.map((variable) => variable.name))
   const typeFor = (type: string) => ({
     string: 'string',
     number: 'number',
@@ -51,7 +65,7 @@ export function exportTypescript(graph: FlowGraph) {
     '}',
     '',
     'async function runFlow(context: FlowContext) {',
-    ...ordered.map((node) => `  ${lineFor(node)}`),
+    ...ordered.map((node) => `  ${lineFor(node, variableNames)}`),
     '}',
   ].join('\n')
 }

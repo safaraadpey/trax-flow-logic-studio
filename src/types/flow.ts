@@ -83,7 +83,18 @@ export const defaultConfig = (type: FlowNodeType): Record<string, unknown> => {
     case 'ActionNode': return { actionName: '', inputMapping: '{}', outputMapping: '{}' }
     case 'ConditionNode': return { left: '', operator: 'equals', right: '', trueLabel: 'true', falseLabel: 'false' }
     case 'RandomNode': return { mode: 'number_between', min: 0, max: 10, listValues: '', outputVariable: '' }
-    case 'TimerNode': return { mode: 'wait_for_duration', durationValue: 1, durationUnit: 'minutes', untilDatetime: '' }
+    case 'TimerNode': return {
+      mode: 'wait_for_duration',
+      durationSource: 'constant',
+      durationValue: 1,
+      durationVariable: '',
+      durationExpression: '',
+      unit: 'minutes',
+      waitUntilSource: 'fixed_datetime',
+      untilDatetime: '',
+      untilVariable: '',
+      untilExpression: '',
+    }
     case 'DbQueryNode': return { queryName: '', table: '', operation: 'select', filters: '[]', outputVariable: '' }
     case 'AssignVariableNode': return { variableName: '', valueExpression: '' }
     case 'LogNode': return { message: '', level: 'info' }
