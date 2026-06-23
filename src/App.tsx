@@ -560,7 +560,7 @@ function BottomPanel() {
 
 function Canvas() {
   const wrapper = useRef<HTMLDivElement>(null)
-  const { screenToFlowPosition, fitView } = useReactFlow()
+  const { screenToFlowPosition, fitView, setCenter } = useReactFlow()
   const { graph, viewport, fitViewVersion, setViewport, onNodesChange, onEdgesChange, onConnect, select, addNode } = useFlowStore()
   const inspectorMode = useUIStore((state) => state.inspectorMode)
   const openInspector = useUIStore((state) => state.openInspector)
@@ -621,6 +621,18 @@ function Canvas() {
     const timeout = setTimeout(() => { if (graph.nodes.length) fitView({ padding: 0.15, duration: 350 }) }, 50)
     return () => clearTimeout(timeout)
   }, [fitViewVersion, fitView, graph.nodes.length])
+  useEffect(() => {
+    if (simulation.status !== 'paused' || !simulation.currentNodeId) return
+    const activeNode = graph.nodes.find((node) => node.id === simulation.currentNodeId)
+    if (!activeNode) return
+    const width = activeNode.measured?.width || activeNode.width || 190
+    const height = activeNode.measured?.height || activeNode.height || 72
+    setCenter(
+      activeNode.position.x + width / 2,
+      activeNode.position.y + height / 2,
+      { zoom: viewport.zoom, duration: 160 },
+    )
+  }, [simulation.currentNodeId, simulation.status, graph.nodes, setCenter, viewport.zoom])
 
   return (
     <main className="canvas" ref={wrapper} onDrop={onDrop} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}>
